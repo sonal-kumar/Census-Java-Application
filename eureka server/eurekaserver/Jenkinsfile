@@ -1,0 +1,87 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'JDK11'
+    }
+    environment {
+        FULL_PATH_BRANCH = "${sh(script:'git name-rev --name-only HEAD', returnStdout: true)}"
+        CURRENT_BRANCH = FULL_PATH_BRANCH.substring(FULL_PATH_BRANCH.lastIndexOf('/') + 1, FULL_PATH_BRANCH.length())
+        TARGET_BRANCH = 'master'
+        GIT_CLONE_URL = "https://{git or bitbucket url }/eurekaserver.git"
+		 registry = "eureka-service"
+        registryCredential = 'ecr:us-east-1:ecr_access'
+        ECR_URL = 'https://090097299954.dkr.ecr.us-east-1.amazonaws.com'
+    }
+    stages {
+       // stage('Clone and Checkout') {
+       //     steps {
+       //         echo "Cloning the Bitbucket repository"
+       //         cleanWs()
+       //         git branch: CURRENT_BRANCH, credentialsId: 'trainingBitbucket', url: GIT_CLONE_URL
+       //     }
+       // }
+        stage('build') {
+            steps {
+                echo 'Building the source'
+                sh 'mvn clean compile'
+            }
+        }
+		 stage('Deploy to Prod') {
+            when {
+                anyOf{
+                    branch 'master';
+                    branch 'release'
+                }
+            }
+            steps {
+                script {
+                    sh 'mvn package'
+                    dockerImage = docker.build registry
+                    docker.withRegistry( ECR_URL, registryCredential ) {
+                        dockerImage.push()
+                    }
+                    sh "docker rmi $registry"
+                }
+            }
+        }
+        stage('Deploy to Dev') {
+            when {
+                anyOf{
+                    branch 'development';
+					branch 'story-*';
+                    branch 'feature-*'
+                }
+            }
+            steps {
+                script {
+                    sh 'mvn package'
+                    dockerImage = docker.build registry
+                    docker.withRegistry( ECR_URL, registryCredential ) {
+                        dockerImage.push()
+                    }
+                    sh "docker rmi $registry"
+                }
+            }
+        }
+    }
+	
+    post {
+        always {
+            echo 'JENKINS PIPELINE'
+            //junit 'target/surefire-reports/*.xml'
+        }
+        success {
+            echo 'JENKINS PIPELINE SUCCESSFUL'
+            // archiveArtifacts artifacts: 'target/*.*', onlyIfSuccessful: true
+        }
+        failure {
+            echo 'JENKINS PIPELINE FAILED'
+        }
+        unstable {
+            echo 'JENKINS PIPELINE WAS MARKED AS UNSTABLE'
+        }
+        changed {
+            echo 'JENKINS PIPELINE STATUS HAS CHANGED SINCE LAST EXECUTION'
+        }
+    }
+}
